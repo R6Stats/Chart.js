@@ -107,6 +107,7 @@ function buildTask() {
   }
 
   var bundled = browserify('./src/chart.js', { standalone: 'Chart' })
+    .ignore('luxon')
     .plugin(collapse)
     .bundle()
     .on('error', errorHandler)
@@ -121,6 +122,7 @@ function buildTask() {
     .pipe(gulp.dest(outDir));
 
   var nonBundled = browserify('./src/chart.js', { standalone: 'Chart' })
+    .ignore('luxon')
     .ignore('moment')
     .plugin(collapse)
     .bundle()

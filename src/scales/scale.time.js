@@ -1,8 +1,19 @@
 /* global window: false */
 'use strict';
 
-var moment = require('moment');
-moment = typeof moment === 'function' ? moment : window.moment;
+var moment, luxon, DateTime;
+try {
+	moment = require('moment'); // eslint-disable-line global-require
+	moment = typeof moment === 'function' ? moment : window.moment;
+} catch (mte) {
+	try {
+		luxon = require('luxon'); // eslint-disable-line global-require
+		luxon = (luxon && luxon.DateTime) ? luxon : window.luxon;
+		DateTime = luxon && luxon.DateTime;
+	} catch (lxe) {
+		throw new Error('Chart.js - Neither Moment.js no Luxon could be found! You must include one of these date libraries to use the time scale. For more info, see https://www.chartjs.org/docs/latest/getting-started/installation.html');
+	}
+}
 
 var defaults = require('../core/core.defaults');
 var helpers = require('../helpers/index');
@@ -179,11 +190,24 @@ function interpolate(table, skey, sval, tkey) {
 	return prev[tkey] + offset;
 }
 
+function millisToDate(value) {
+	return luxon ? DateTime.fromMillis(value) : moment(value);
+}
+
 /**
  * Convert the given value to a moment object using the given time options.
  * @see http://momentjs.com/docs/#/parsing/
  */
-function momentify(value, options) {
+function createDate(value, options) {
+	if (luxon) {
+		if (typeof value === 'number') {
+			return DateTime.fromMillis(value);
+		}
+		if (value instanceof Date) {
+			return DateTime.fromJSDate(value);
+		}
+		throw 'Input must be either a Date or milliseconds since epoch, but got ' + value;
+	}
 	var parser = options.parser;
 	var format = options.parser || options.format;
 
@@ -212,14 +236,18 @@ function momentify(value, options) {
 	return value;
 }
 
+function isValid(date) {
+	return luxon ? date.isValid : date.isValid();
+}
+
 function parse(input, scale) {
 	if (helpers.isNullOrUndef(input)) {
 		return null;
 	}
 
 	var options = scale.options.time;
-	var value = momentify(scale.getRightValue(input), options);
-	if (!value.isValid()) {
+	var value = createDate(scale.getRightValue(input), options);
+	if (!isValid(value)) {
 		return null;
 	}
 
@@ -278,7 +306,8 @@ function determineUnitForAutoTicks(minUnit, min, max, capacity) {
  * Figures out what unit to format a set of ticks with
  */
 function determineUnitForFormatting(ticks, minUnit, min, max) {
-	var duration = moment.duration(moment(max).diff(moment(min)));
+	var duration = luxon ? createDate(max).diff(createDate(min))
+		: moment.duration(moment(max).diff(moment(min)));
 	var ilen = UNITS.length;
 	var i, unit;
 
@@ -394,7 +423,7 @@ function ticksFromTimestamps(values, majorUnit) {
 
 	for (i = 0, ilen = values.length; i < ilen; ++i) {
 		value = values[i];
-		major = majorUnit ? value === +moment(value).startOf(majorUnit) : false;
+		major = majorUnit ? value === millisToDate(value).startOf(majorUnit).valueOf() : false;
 
 		ticks.push({
 			value: value,
@@ -406,18 +435,27 @@ function ticksFromTimestamps(values, majorUnit) {
 }
 
 function determineLabelFormat(data, timeOpts) {
-	var i, momentDate, hasTime;
+	var i, date, hasTime;
 	var ilen = data.length;
 
 	// find the label with the most parts (milliseconds, minutes, etc.)
 	// format all labels with the same level of detail as the most specific label
 	for (i = 0; i < ilen; i++) {
-		momentDate = momentify(data[i], timeOpts);
-		if (momentDate.millisecond() !== 0) {
-			return 'MMM D, YYYY h:mm:ss.SSS a';
-		}
-		if (momentDate.second() !== 0 || momentDate.minute() !== 0 || momentDate.hour() !== 0) {
-			hasTime = true;
+		date = createDate(data[i], timeOpts);
+		if (luxon) {
+			if (date.millisecond !== 0) {
+				return 'MMM D, YYYY h:mm:ss.SSS a';
+			}
+			if (date.second !== 0 || date.minute !== 0 || date.hour !== 0) {
+				hasTime = true;
+			}
+		} else {
+			if (date.millisecond() !== 0) {
+				return 'MMM D, YYYY h:mm:ss.SSS a';
+			}
+			if (date.second() !== 0 || date.minute() !== 0 || date.hour() !== 0) {
+				hasTime = true;
+			}
 		}
 	}
 	if (hasTime) {
@@ -463,12 +501,12 @@ module.exports = function() {
 				millisecond: 'h:mm:ss.SSS a', // 11:20:01.123 AM,
 				second: 'h:mm:ss a', // 11:20:01 AM
 				minute: 'h:mm a', // 11:20 AM
-				hour: 'hA', // 5PM
-				day: 'MMM D', // Sep 4
-				week: 'll', // Week 46, or maybe "[W]WW - YYYY" ?
-				month: 'MMM YYYY', // Sept 2015
-				quarter: '[Q]Q - YYYY', // Q3
-				year: 'YYYY' // 2015
+				hour: luxon ? 'ha' : 'hA', // 5PM
+				day: luxon ? 'MMM d' : 'MMM D', // Sep 4
+				week: luxon ? 'WW' : 'll', // Week 46, or maybe "[W]WW - YYYY" ?
+				month: luxon ? 'MMM yyyy' : 'MMM YYYY', // Sept 2015
+				quarter: luxon ? '\'Q\'q - yyyy' : '[Q]Q - YYYY', // Q3 - 2015
+				year: luxon ? 'yyyy' : 'YYYY' // 2015
 			},
 		},
 		ticks: {
@@ -492,10 +530,6 @@ module.exports = function() {
 
 	var TimeScale = Scale.extend({
 		initialize: function() {
-			if (!moment) {
-				throw new Error('Chart.js - Moment.js could not be found! You must include it before Chart.js to use the time scale. Download at https://momentjs.com');
-			}
-
 			this.mergeTicksOptions();
 
 			Scale.prototype.initialize.call(this);
@@ -660,13 +694,13 @@ module.exports = function() {
 				label = me.getRightValue(value);
 			}
 			if (timeOpts.tooltipFormat) {
-				return momentify(label, timeOpts).format(timeOpts.tooltipFormat);
+				return createDate(label, timeOpts).format(timeOpts.tooltipFormat);
 			}
 			if (typeof label === 'string') {
 				return label;
 			}
 
-			return momentify(label, timeOpts).format(me._labelFormat);
+			return createDate(label, timeOpts).format(me._labelFormat);
 		},
 
 		/**
@@ -681,10 +715,11 @@ module.exports = function() {
 			var minorFormat = formats[me._unit];
 			var majorUnit = me._majorUnit;
 			var majorFormat = formats[majorUnit];
-			var majorTime = tick.clone().startOf(majorUnit).valueOf();
+			var majorTime = (luxon ? tick : tick.clone()).startOf(majorUnit).valueOf();
 			var majorTickOpts = options.ticks.major;
 			var major = majorTickOpts.enabled && majorUnit && majorFormat && time === majorTime;
-			var label = tick.format(formatOverride ? formatOverride : major ? majorFormat : minorFormat);
+			var format = formatOverride ? formatOverride : major ? majorFormat : minorFormat;
+			var label = luxon ? tick.toFormat(format) : tick.format(format);
 			var tickOpts = major ? majorTickOpts : options.ticks.minor;
 			var formatter = helpers.valueOrDefault(tickOpts.callback, tickOpts.userCallback);
 
@@ -696,7 +731,7 @@ module.exports = function() {
 			var i, ilen;
 
 			for (i = 0, ilen = ticks.length; i < ilen; ++i) {
-				labels.push(this.tickFormatFunction(moment(ticks[i].value), i, ticks));
+				labels.push(this.tickFormatFunction(millisToDate(ticks[i].value), i, ticks));
 			}
 
 			return labels;

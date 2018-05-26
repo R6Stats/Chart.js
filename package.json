@@ -41,6 +41,8 @@
     "karma-firefox-launcher": "^1.0.1",
     "karma-jasmine": "^1.1.0",
     "karma-jasmine-html-reporter": "^0.2.2",
+    "moment": "^2.10.2",
+    "luxon": "^1.2.1",
     "merge-stream": "^1.0.1",
     "pixelmatch": "^4.0.2",
     "vinyl-source-stream": "^1.1.0",
@@ -51,7 +53,9 @@
     "main": "Chart.js"
   },
   "dependencies": {
-    "chartjs-color": "^2.1.0",
+    "chartjs-color": "^2.1.0"
+  },
+  "peerDependencies": {
     "moment": "^2.10.2"
   }
 }
